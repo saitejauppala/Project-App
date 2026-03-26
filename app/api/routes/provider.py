@@ -1,16 +1,23 @@
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from sqlalchemy import select, and_
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_provider, get_current_user
 from app.models.user import User
 from app.models.booking import BookingStatus
+from app.models.service import Service, ServiceCategory
 from app.schemas.booking import (
     BookingWithDetails, BookingListResponse, BookingStatusUpdate,
     BookingAcceptedConfirmation,
 )
-from app.schemas.service import PaginationParams
+from app.schemas.service import (
+    PaginationParams, ServiceWithCategory, ServiceListResponse,
+    ProviderServiceCreate, ProviderServiceUpdate,
+)
 from app.services.provider_service import ProviderService
+from app.services.service_service import ServiceCategoryService
 
 router = APIRouter(prefix="/provider", tags=["Provider"])
 
@@ -266,3 +273,182 @@ async def get_provider_stats(
     provider_service = ProviderService(db)
     stats = await provider_service.get_provider_stats(str(current_user.id))
     return stats
+
+
+# ─────────────────────────────────────────────
+# Provider Service Management
+# ─────────────────────────────────────────────
+
+@router.get(
+    "/my-services",
+    response_model=ServiceListResponse,
+    summary="List my service listings",
+)
+async def list_my_services(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_provider),
+):
+    """List all services created by this provider."""
+    offset = (page - 1) * limit
+
+    # Count
+    count_result = await db.execute(
+        select(Service).where(Service.provider_id == current_user.id)
+    )
+    all_items = count_result.scalars().all()
+    total = len(all_items)
+
+    # Paginated with category loaded
+    result = await db.execute(
+        select(Service)
+        .options(selectinload(Service.category))
+        .where(Service.provider_id == current_user.id)
+        .order_by(Service.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    items = result.scalars().all()
+    pages = (total + limit - 1) // limit
+
+    return ServiceListResponse(
+        items=list(items),
+        total=total,
+        page=page,
+        limit=limit,
+        pages=pages,
+    )
+
+
+@router.post(
+    "/my-services",
+    response_model=ServiceWithCategory,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add a new service listing",
+)
+async def add_my_service(
+    service_data: ProviderServiceCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_provider),
+):
+    """
+    Provider adds a new service listing.
+    The service becomes visible to customers immediately.
+    Requires a valid category_id from GET /api/v1/services/categories.
+    """
+    # Verify category exists
+    cat_result = await db.execute(
+        select(ServiceCategory).where(
+            and_(
+                ServiceCategory.id == service_data.category_id,
+                ServiceCategory.is_active == True,
+            )
+        )
+    )
+    category = cat_result.scalar_one_or_none()
+    if not category:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Category not found or inactive. Check GET /api/v1/services/categories for valid IDs.",
+        )
+
+    service = Service(
+        category_id=category.id,
+        provider_id=current_user.id,
+        name=service_data.name,
+        description=service_data.description,
+        base_price=float(service_data.base_price),
+        duration_minutes=service_data.duration_minutes,
+        is_active=True,
+    )
+    db.add(service)
+    await db.commit()
+    await db.refresh(service)
+
+    # Reload with category relationship
+    result = await db.execute(
+        select(Service)
+        .options(selectinload(Service.category))
+        .where(Service.id == service.id)
+    )
+    return result.scalar_one()
+
+
+@router.patch(
+    "/my-services/{service_id}",
+    response_model=ServiceWithCategory,
+    summary="Update my service listing",
+)
+async def update_my_service(
+    service_id: str,
+    service_data: ProviderServiceUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_provider),
+):
+    """Update a service listing (only the provider who created it)."""
+    result = await db.execute(
+        select(Service)
+        .options(selectinload(Service.category))
+        .where(
+            and_(
+                Service.id == service_id,
+                Service.provider_id == current_user.id,
+            )
+        )
+    )
+    service = result.scalar_one_or_none()
+
+    if not service:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Service not found or you don't own it.",
+        )
+
+    update_fields = service_data.model_dump(exclude_unset=True)
+    for field, value in update_fields.items():
+        if field == "base_price":
+            value = float(value)
+        setattr(service, field, value)
+
+    await db.commit()
+    await db.refresh(service)
+
+    result = await db.execute(
+        select(Service)
+        .options(selectinload(Service.category))
+        .where(Service.id == service.id)
+    )
+    return result.scalar_one()
+
+
+@router.delete(
+    "/my-services/{service_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove my service listing",
+)
+async def delete_my_service(
+    service_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_provider),
+):
+    """Soft-delete (deactivate) a service listing."""
+    result = await db.execute(
+        select(Service).where(
+            and_(
+                Service.id == service_id,
+                Service.provider_id == current_user.id,
+            )
+        )
+    )
+    service = result.scalar_one_or_none()
+
+    if not service:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Service not found or you don't own it.",
+        )
+
+    service.is_active = False
+    await db.commit()
+    return None

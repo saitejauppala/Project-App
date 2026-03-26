@@ -37,10 +37,14 @@ class Service(Base):
     category_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("service_categories.id", ondelete="CASCADE"), nullable=False
     )
+    # Provider who owns this service listing (nullable = global/admin-created service)
+    provider_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     base_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
-    duration_minutes: Mapped[int] = mapped_column(default=60, nullable=False)  # Estimated service duration
+    duration_minutes: Mapped[int] = mapped_column(default=60, nullable=False)
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -49,11 +53,13 @@ class Service(Base):
 
     # Relationships
     category: Mapped["ServiceCategory"] = relationship("ServiceCategory", back_populates="services")
+    provider: Mapped[Optional["User"]] = relationship("User", foreign_keys=[provider_id])
     bookings: Mapped[List["Booking"]] = relationship("Booking", back_populates="service")
 
     # Indexes
     __table_args__ = (
         Index("idx_service_category_active", "category_id", "is_active"),
+        Index("idx_service_provider", "provider_id", "is_active"),
     )
 
     def __repr__(self) -> str:

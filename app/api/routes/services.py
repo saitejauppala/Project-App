@@ -150,11 +150,13 @@ async def list_services(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     category_id: Optional[str] = Query(None),
+    provider_id: Optional[str] = Query(None, description="Filter by provider ID"),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all services with optional category filter (public endpoint, cached for 5 minutes)."""
+    """List all active services (public endpoint, cached for 5 minutes).
+    Customers see all provider-listed services here."""
     # Try cache first
-    cache_key = f"services:list:{page}:{limit}:{category_id or 'all'}"
+    cache_key = f"services:list:{page}:{limit}:{category_id or 'all'}:{provider_id or 'all'}"
     cached_result = await redis_client.get(cache_key)
     
     if cached_result:
@@ -168,7 +170,7 @@ async def list_services(
     service_service = ServiceService(db)
     
     items, total = await service_service.get_all(
-        pagination, category_id=category_id
+        pagination, category_id=category_id, provider_id=provider_id
     )
     pages = (total + limit - 1) // limit
     

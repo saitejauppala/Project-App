@@ -128,6 +128,7 @@ class ServiceService:
         self,
         pagination: PaginationParams,
         category_id: Optional[str] = None,
+        provider_id: Optional[str] = None,
         only_active: bool = True,
     ) -> Tuple[List[Service], int]:
         """Get all services with optional filtering and pagination."""
@@ -138,6 +139,9 @@ class ServiceService:
         
         if category_id:
             query = query.where(Service.category_id == category_id)
+
+        if provider_id:
+            query = query.where(Service.provider_id == provider_id)
         
         # Get total count
         count_result = await self.db.execute(

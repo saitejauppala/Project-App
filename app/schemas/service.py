@@ -54,6 +54,7 @@ class ServiceUpdate(BaseModel):
 class ServiceResponse(ServiceBase):
     id: str
     category_id: str
+    provider_id: Optional[str] = None
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -63,6 +64,25 @@ class ServiceResponse(ServiceBase):
 
 class ServiceWithCategory(ServiceResponse):
     category: ServiceCategoryResponse
+
+
+# Provider adds their own service listing
+class ProviderServiceCreate(BaseModel):
+    """Provider creates a service under an existing category."""
+    category_id: str = Field(..., description="ID of the service category")
+    name: str = Field(..., min_length=2, max_length=100)
+    description: Optional[str] = Field(None, max_length=1000)
+    base_price: Decimal = Field(..., gt=0, decimal_places=2, description="Price in INR (₹)")
+    duration_minutes: int = Field(default=60, ge=15, le=480, description="Estimated duration in minutes")
+
+
+class ProviderServiceUpdate(BaseModel):
+    """Provider updates their own service listing."""
+    name: Optional[str] = Field(None, min_length=2, max_length=100)
+    description: Optional[str] = Field(None, max_length=1000)
+    base_price: Optional[Decimal] = Field(None, gt=0, decimal_places=2)
+    duration_minutes: Optional[int] = Field(None, ge=15, le=480)
+    is_active: Optional[bool] = None
 
 
 # Pagination Schemas
