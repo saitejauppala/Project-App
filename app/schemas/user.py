@@ -46,6 +46,14 @@ class UserLogin(BaseModel):
     phone: str = Field(..., min_length=10, max_length=20)
     password: str = Field(..., min_length=1)
 
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        v = v.strip().replace(" ", "")
+        if not re.match(r"^[\+]?[0-9]{10,15}$", v):
+            raise ValueError("Invalid phone number format")
+        return v
+
 
 # Token schemas
 class Token(BaseModel):
@@ -96,3 +104,53 @@ class ProviderProfileResponse(ProviderProfileBase):
 
 class UserWithProfile(UserResponse):
     provider_profile: Optional[ProviderProfileResponse] = None
+
+
+# ----- Provider-specific auth schemas -----
+
+class ProviderRegister(BaseModel):
+    """
+    Registration schema for providers.
+    Role is always forced to PROVIDER.
+    """
+    name: str = Field(..., min_length=2, max_length=255)
+    phone: str = Field(..., min_length=10, max_length=20)
+    password: str = Field(..., min_length=8, max_length=100)
+    bio: Optional[str] = Field(None, max_length=500)
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        import re
+        v = v.strip().replace(" ", "")
+        if not re.match(r"^[\+]?[0-9]{10,15}$", v):
+            raise ValueError("Invalid phone number format")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        import re
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        if not re.search(r"[A-Z]", v):
+            raise ValueError("Password must contain at least one uppercase letter")
+        if not re.search(r"[a-z]", v):
+            raise ValueError("Password must contain at least one lowercase letter")
+        if not re.search(r"[0-9]", v):
+            raise ValueError("Password must contain at least one digit")
+        return v
+
+
+class ProviderLoginResponse(BaseModel):
+    """Extended token response for providers, includes profile info."""
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    provider_id: str
+    name: str
+    phone: str
+    is_verified: bool
+    is_available: bool
+    rating: float
+    total_reviews: int

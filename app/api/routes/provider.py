@@ -15,6 +15,68 @@ from app.services.provider_service import ProviderService
 router = APIRouter(prefix="/provider", tags=["Provider"])
 
 
+@router.get(
+    "/dashboard",
+    summary="Provider dashboard - pending booking requests",
+)
+async def provider_dashboard(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_provider),
+):
+    """
+    Provider dashboard showing:
+    - Profile summary (name, rating, verification status)
+    - List of pending booking requests available to accept
+    - Count of active (assigned/in-progress) bookings
+    """
+    pagination = PaginationParams(page=page, limit=limit)
+    provider_service = ProviderService(db)
+
+    # Pending bookings available to accept
+    pending_items, pending_total = await provider_service.get_available_bookings(
+        str(current_user.id), pagination
+    )
+
+    # Active bookings (assigned + in_progress)
+    active_items, active_total = await provider_service.get_provider_bookings(
+        str(current_user.id), PaginationParams(page=1, limit=100), BookingStatus.ASSIGNED
+    )
+    in_progress_items, in_progress_total = await provider_service.get_provider_bookings(
+        str(current_user.id), PaginationParams(page=1, limit=100), BookingStatus.IN_PROGRESS
+    )
+
+    profile = current_user.provider_profile
+
+    return {
+        "provider": {
+            "id": str(current_user.id),
+            "name": current_user.name,
+            "phone": current_user.phone,
+            "is_verified": profile.is_verified if profile else False,
+            "is_available": profile.is_available if profile else False,
+            "rating": profile.rating if profile else 0.0,
+            "total_reviews": profile.total_reviews if profile else 0,
+        },
+        "pending_requests": {
+            "total": pending_total,
+            "page": page,
+            "limit": limit,
+            "pages": (pending_total + limit - 1) // limit,
+            "items": pending_items,
+        },
+        "active_bookings": {
+            "assigned": active_total,
+            "in_progress": in_progress_total,
+        },
+        "message": (
+            f"You have {pending_total} pending request(s) waiting for acceptance."
+            if pending_total > 0
+            else "No pending requests at the moment."
+        ),
+    }
+
 @router.get("/available-bookings", response_model=BookingListResponse)
 async def list_available_bookings(
     page: int = Query(1, ge=1),

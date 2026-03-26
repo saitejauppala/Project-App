@@ -5,7 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, get_current_user
 from app.core.redis import rate_limiter
 from app.schemas.user import (
-    UserRegister, UserLogin, Token, UserResponse, UserWithProfile
+    UserRegister, UserLogin, Token, UserResponse, UserWithProfile,
+    ProviderRegister, ProviderLoginResponse,
 )
 from app.schemas.password_reset import (
     ForgotPasswordRequest, ForgotPasswordResponse,
@@ -207,3 +208,113 @@ async def reset_password(
     await reset_service.mark_token_used(reset_token)
     
     return ResetPasswordResponse(message="Password reset successful.")
+
+
+# ─────────────────────────────────────────────
+# Provider-specific auth endpoints
+# ─────────────────────────────────────────────
+
+@router.post(
+    "/provider/register",
+    response_model=UserWithProfile,
+    status_code=status.HTTP_201_CREATED,
+    summary="Register as a provider",
+)
+async def provider_register(
+    provider_data: ProviderRegister,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Register a new provider account.
+    Role is automatically set to PROVIDER.
+    A provider profile is created with the optional bio.
+    """
+    user_service = UserService(db)
+
+    # Build a UserRegister with role forced to PROVIDER
+    user_reg = UserRegister(
+        name=provider_data.name,
+        phone=provider_data.phone,
+        password=provider_data.password,
+        role=UserRole.PROVIDER,
+    )
+
+    try:
+        user = await user_service.create_user(user_reg)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    # Set bio on the auto-created provider profile if provided
+    if provider_data.bio and user.provider_profile:
+        user.provider_profile.bio = provider_data.bio
+        await db.commit()
+        await db.refresh(user)
+
+    return user
+
+
+@router.post(
+    "/provider/login",
+    response_model=ProviderLoginResponse,
+    summary="Provider login",
+)
+async def provider_login(
+    request: Request,
+    login_data: UserLogin,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Provider login with phone and password.
+    Returns JWT tokens plus provider profile details
+    (verification status, availability, rating).
+    """
+    # Rate limiting by IP
+    client_ip = request.client.host if request.client else "unknown"
+    rate_key = f"provider_login_attempts:{client_ip}"
+
+    allowed, _, _ = await rate_limiter.is_allowed(rate_key, limit=5, window=60)
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Please try again later.",
+        )
+
+    user_service = UserService(db)
+    user = await user_service.authenticate(login_data.phone, login_data.password)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid phone number or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if user.role != UserRole.PROVIDER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This login is for providers only. Please use the customer login.",
+        )
+
+    profile = user.provider_profile
+    if not profile:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Provider profile not found. Please contact support.",
+        )
+
+    access_token, refresh_token = create_token_pair(str(user.id), user.role.value)
+
+    return ProviderLoginResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        provider_id=str(user.id),
+        name=user.name,
+        phone=user.phone,
+        is_verified=profile.is_verified,
+        is_available=profile.is_available,
+        rating=profile.rating,
+        total_reviews=profile.total_reviews,
+    )
