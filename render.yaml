@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: endlesspath-services-api
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: DATABASE_URL
+        fromDatabase:
+          name: endlesspath-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: endlesspath-redis
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: 30
+      - key: REFRESH_TOKEN_EXPIRE_DAYS
+        value: 7
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: ALLOWED_HOSTS
+        value: "*"
+      - key: DEBUG
+        value: "false"
+
+databases:
+  - name: endlesspath-db
+    plan: starter
+    databaseName: endlesspath
+    user: endlesspath
+
+redis:
+  - name: endlesspath-redis
+    plan: starter
+    maxmemoryPolicy: allkeys-lru

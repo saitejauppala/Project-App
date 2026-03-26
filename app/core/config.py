@@ -6,12 +6,12 @@ import os
 
 class Settings(BaseSettings):
     # App
-    APP_NAME: str = "Home Services Marketplace"
+    APP_NAME: str = "EndlessPath Services"
     DEBUG: bool = False
-    ALLOWED_HOSTS: str = "http://localhost:3000,http://localhost:5173"
+    ALLOWED_HOSTS: str = "*"
     
     # Database
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:password@localhost:5432/homeservices"
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:password@localhost:5432/endlesspath"
     
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -25,13 +25,22 @@ class Settings(BaseSettings):
     # Razorpay
     RAZORPAY_KEY_ID: str = ""
     RAZORPAY_KEY_SECRET: str = ""
+    RAZORPAY_WEBHOOK_SECRET: str = ""
+    
+    # CORS
+    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8080"
     
     class Config:
         env_file = ".env"
         case_sensitive = True
     
     def get_allowed_hosts(self) -> List[str]:
+        if self.ALLOWED_HOSTS == "*":
+            return ["*"]
         return [host.strip() for host in self.ALLOWED_HOSTS.split(",")]
+    
+    def get_cors_origins(self) -> List[str]:
+        return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
 
 
 @lru_cache()
