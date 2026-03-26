@@ -7,6 +7,7 @@ from app.models.user import User
 from app.models.booking import BookingStatus
 from app.schemas.booking import (
     BookingWithDetails, BookingListResponse, BookingStatusUpdate,
+    BookingAcceptedConfirmation,
 )
 from app.schemas.service import PaginationParams
 from app.services.provider_service import ProviderService
@@ -86,25 +87,48 @@ async def get_booking_details(
     return booking
 
 
-@router.post("/bookings/{booking_id}/accept", response_model=BookingWithDetails)
+@router.post("/bookings/{booking_id}/accept", response_model=BookingAcceptedConfirmation)
 async def accept_booking(
     booking_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_provider),
 ):
-    """Accept a pending booking (assigns it to this provider)."""
+    """
+    Accept a pending booking.
+    Assigns the booking to this provider and returns a full confirmation
+    with service details, customer info, and appointment time.
+    """
     provider_service = ProviderService(db)
-    
+
     try:
         booking = await provider_service.accept_booking(
             booking_id, str(current_user.id)
         )
-        return booking
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
+
+    # Build confirmation response
+    return BookingAcceptedConfirmation(
+        message=f"Booking accepted! You are now assigned to this {booking.service.name} appointment.",
+        booking_id=str(booking.id),
+        status=booking.status,
+        assigned_at=booking.assigned_at,
+        # Service info
+        service_name=booking.service.name,
+        service_category=booking.service.category.name,
+        service_duration_minutes=booking.service.duration_minutes,
+        service_price=booking.price,
+        # Customer info
+        customer_name=booking.user.full_name,
+        customer_phone=getattr(booking.user, "phone", None),
+        # Appointment info
+        scheduled_time=booking.scheduled_time,
+        address=booking.address,
+        notes=booking.notes,
+    )
 
 
 @router.post("/bookings/{booking_id}/start", response_model=BookingWithDetails)

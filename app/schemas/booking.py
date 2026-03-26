@@ -75,3 +75,31 @@ class BookingStatusUpdate(BaseModel):
 
 class ProviderAssignment(BaseModel):
     provider_id: str
+
+
+class BookingAcceptedConfirmation(BaseModel):
+    """
+    Rich confirmation response returned to provider when they accept a booking.
+    Contains all details needed to prepare for the service.
+    """
+    message: str
+    booking_id: str
+    status: BookingStatus
+    assigned_at: datetime
+
+    # Service details
+    service_name: str
+    service_category: str
+    service_duration_minutes: int
+    service_price: Decimal
+
+    # Customer details
+    customer_name: str
+    customer_phone: Optional[str] = None
+
+    # Appointment details
+    scheduled_time: datetime
+    address: str
+    notes: Optional[str] = None
+
+    model_config = {"from_attributes": True}
